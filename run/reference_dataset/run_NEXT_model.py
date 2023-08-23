@@ -16,7 +16,7 @@ def compute_accuracy_metric(dataset, model, horizon):
     result["mae"] = []
     result["mse"] = []
     nb_test_window = int(dataset.shape[0] * 0.2) - horizon + 1
-    for i in tqdm(range(0,nb_test_window,100)):
+    for i in tqdm(range(nb_test_window)):
         y_signal = dataset[: -horizon - i]
         w_signal = pd.DataFrame(np.zeros_like(y_signal))
         model_prediction = model.predict(
