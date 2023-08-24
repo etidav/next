@@ -258,8 +258,8 @@ class NEXT(ABC, tf.keras.Model):
                 axis=[1, 2],
             )
             elbo_entropy = tf.math.reduce_sum(
-                tf.math.multiply_no_nan(
-                    tf.math.log(posterior_probabilities), posterior_probabilities
+                tf.math.multiply(
+                    tf.math.log(posterior_probabilities+10**-10), posterior_probabilities
                 ),
                 axis=[1, 2],
             )
@@ -281,13 +281,13 @@ class NEXT(ABC, tf.keras.Model):
                 axis=[1, 2],
             )
             elbo_entropy = tf.math.reduce_sum(
-                tf.math.multiply_no_nan(
-                    tf.math.log(posterior_probabilities), posterior_probabilities
+                tf.math.multiply(
+                    tf.math.log(posterior_probabilities+10**-10), posterior_probabilities
                 ),
                 axis=[1, 2],
             )
             elbo_hidden_states = tf.math.reduce_sum(
-                tf.math.multiply_no_nan(
+                tf.math.multiply(
                     tf.math.log(prior_probabilities+10**-10), posterior_probabilities
                 ),
                 axis=[1, 2],
