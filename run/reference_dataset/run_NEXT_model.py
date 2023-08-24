@@ -67,11 +67,6 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, help="", default=None)
     parser.add_argument("--seed", type=int, help="", default=1)
     parser.add_argument("--gpu_number", type=int, help="", default=0)
-    parser.add_argument(
-        "--no_input_preprocess",
-        action="store_false",
-        help="add this argument to remove the next input preprocessing.",
-    )
 
     args = parser.parse_args()
 
@@ -91,7 +86,7 @@ if __name__ == "__main__":
     past_dependency = args.past_dependency
     season = args.season
     horizon = args.horizon
-    preprocess_input = args.no_input_preprocess
+    preprocess_input = False
     nb_max_epoch = args.nb_max_epoch
     nb_iteration_per_epoch = args.nb_iteration_per_epoch
     learning_rate = args.learning_rate
