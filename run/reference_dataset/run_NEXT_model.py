@@ -7,7 +7,7 @@ import json
 from tqdm import tqdm
 import tensorflow as tf
 from utils.utils import write_json
-from model.reference_dataset.NEXT_model import next_model
+from model.reference_dataset.NEXT_model import next_model, next_model_no_lstm
 
 
 def compute_accuracy_metric(dataset, model, horizon):
@@ -110,10 +110,11 @@ if __name__ == "__main__":
     all_y_data = (dataset - dataset[:train_size].mean(axis=0)) / dataset[
         :train_size
     ].std(axis=0)
+    
     y_train = all_y_data[:train_and_eval_size]
     w_train = pd.DataFrame(np.zeros_like(y_train))
 
-    model = next_model(
+    model = next_model_no_lstm(
         nb_hidden_states=2, past_dependency=past_dependency, season=season, horizon=horizon,
     )
 
