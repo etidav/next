@@ -5,7 +5,7 @@ import pandas as pd
 import json
 import tensorflow as tf
 from utils.utils import write_json
-from model.fashion_dataset.NEXT_model import (
+from model.NEXT_model import (
     next_model_no_ext_signal,
     next_model_with_ext_signal,
 )

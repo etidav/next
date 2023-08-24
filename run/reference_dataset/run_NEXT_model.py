@@ -7,10 +7,10 @@ import json
 from tqdm import tqdm
 import tensorflow as tf
 from utils.utils import write_json
-from model.reference_dataset.NEXT_model import next_model, next_model_no_lstm
+from model.NEXT_model import next_model_no_ext_signal, next_model_no_ext_signal_FC
 
 
-def compute_accuracy_metric(dataset, model, horizon):
+def compute_accuracy_metric(dataset, model, horizon, preprocess_input):
 
     result = {}
     result["mae"] = []
@@ -23,6 +23,7 @@ def compute_accuracy_metric(dataset, model, horizon):
             y_signal=y_signal,
             w_signal=w_signal,
             nb_simulation=1,
+            preprocess_input=preprocess_input
         )
         model_prediction = model_prediction['y_pred_mean'].T
 
@@ -66,6 +67,11 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, help="", default=None)
     parser.add_argument("--seed", type=int, help="", default=1)
     parser.add_argument("--gpu_number", type=int, help="", default=0)
+    parser.add_argument(
+        "--no_input_preprocess",
+        action="store_false",
+        help="add this argument to remove the next input preprocessing.",
+    )
 
     args = parser.parse_args()
 
@@ -85,6 +91,7 @@ if __name__ == "__main__":
     past_dependency = args.past_dependency
     season = args.season
     horizon = args.horizon
+    preprocess_input = args.no_input_preprocess
     nb_max_epoch = args.nb_max_epoch
     nb_iteration_per_epoch = args.nb_iteration_per_epoch
     learning_rate = args.learning_rate
@@ -114,7 +121,7 @@ if __name__ == "__main__":
     y_train = all_y_data[:train_and_eval_size]
     w_train = pd.DataFrame(np.zeros_like(y_train))
 
-    model = next_model_no_lstm(
+    model = next_model_no_ext_signal_FC(
         nb_hidden_states=2, past_dependency=past_dependency, season=season, horizon=horizon,
     )
 
@@ -128,9 +135,10 @@ if __name__ == "__main__":
         learning_rate=learning_rate,
         batch_size=batch_size,
         model_folder=main_folder,
+        preprocess_input=preprocess_input
     )
 
     print("Compute accuracy")
-    model_accuracy = compute_accuracy_metric(all_y_data, model, horizon)
+    model_accuracy = compute_accuracy_metric(all_y_data, model, horizon, preprocess_input)
     write_json(model_accuracy, os.path.join(main_folder, "final_accuracy.json"))
     print(model_accuracy)
