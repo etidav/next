@@ -566,6 +566,7 @@ class NEXT(ABC, tf.keras.Model):
                 write_pickle(
                     self.get_param(), os.path.join(model_folder, "final_param.pkl")
                 )
+        return eval_metric
 
     def sample_and_normalize_dataset(self, y_signal, w_signal, batch_size, preprocess_input=True):
         """
@@ -799,7 +800,7 @@ class NEXT(ABC, tf.keras.Model):
                 y_past_std, axis=2
             ) + tf.expand_dims(y_past_mean, axis=2)
         prior_probabilities = self.compute_prior_probabilities(
-            w_past, y_past, time_index
+            y_past, w_past, time_index
         )
         final_prediction_renorm = tf.math.reduce_sum(prior_probabilities*emission_laws_mu, axis=2)
         
