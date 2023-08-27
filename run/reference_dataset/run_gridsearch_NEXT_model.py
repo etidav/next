@@ -7,7 +7,7 @@ import json
 from tqdm import tqdm
 import tensorflow as tf
 from utils.utils import write_json
-from model.NEXT_model import next_model_no_ext_signal, next_model_no_ext_signal_FC
+from model.NEXT_model import next_model_reference_dataset, next_model_reference_dataset_small
 
 
 if __name__ == "__main__":
@@ -29,6 +29,11 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size_list", nargs="+", type=int, help="", default=None)
     parser.add_argument("--seed", type=int, help="", default=1)
     parser.add_argument("--gpu_number", type=int, help="", default=0)
+    parser.add_argument(
+        "--small_model",
+        action="store_true",
+        help="add this argument to train a small version of the next model without lstm components",
+    )
 
     args = parser.parse_args()
 
@@ -54,6 +59,7 @@ if __name__ == "__main__":
     learning_rate_list = args.learning_rate_list
     optimizer_name = args.optimizer_name
     batch_size_list = args.batch_size_list
+    small_model = args.small_model
 
     if main_folder[-1] != "/":
         main_folder += "/"
@@ -86,9 +92,15 @@ if __name__ == "__main__":
                 model_folder = os.path.join(main_folder, f'past_dependency_{past_dependency}_lr_{learning_rate}_batch_size_{batch_size}')
                 if not os.path.exists(model_folder):
                     os.makedirs(model_folder)
-                model = next_model_no_ext_signal_FC(
-                    nb_hidden_states=2, past_dependency=past_dependency, season=season, horizon=horizon,
-                )
+                    
+                if small_model:
+                    model = next_model_reference_dataset_small(
+                        nb_hidden_states=2, past_dependency=past_dependency, season=season, horizon=horizon,
+                    )
+                else:
+                    model = next_model_reference_dataset(
+                        nb_hidden_states=2, past_dependency=past_dependency, season=season, horizon=horizon,
+                    )
 
                 print("Start Training")
                 model_eval = model.fit(

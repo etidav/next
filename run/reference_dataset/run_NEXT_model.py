@@ -67,6 +67,11 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, help="", default=None)
     parser.add_argument("--seed", type=int, help="", default=1)
     parser.add_argument("--gpu_number", type=int, help="", default=0)
+    parser.add_argument(
+        "--small_model",
+        action="store_true",
+        help="add this argument to train a small version of the next model without lstm components",
+    )
 
     args = parser.parse_args()
 
@@ -92,6 +97,7 @@ if __name__ == "__main__":
     learning_rate = args.learning_rate
     optimizer_name = args.optimizer_name
     batch_size = args.batch_size
+    small_model = args.small_model
 
     if main_folder[-1] != "/":
         main_folder += "/"
@@ -116,9 +122,14 @@ if __name__ == "__main__":
     y_train = all_y_data[:train_and_eval_size]
     w_train = pd.DataFrame(np.zeros_like(y_train))
 
-    model = next_model_reference_dataset(
-        nb_hidden_states=2, past_dependency=past_dependency, season=season, horizon=horizon,
-    )
+    if small_model:
+        model = next_model_reference_dataset_small(
+            nb_hidden_states=2, past_dependency=past_dependency, season=season, horizon=horizon,
+        )
+    else:
+        model = next_model_reference_dataset_small(
+            nb_hidden_states=2, past_dependency=past_dependency, season=season, horizon=horizon,
+        )
 
     print("Start Training")
     model.fit(
