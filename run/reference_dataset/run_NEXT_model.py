@@ -127,7 +127,7 @@ if __name__ == "__main__":
             nb_hidden_states=2, past_dependency=past_dependency, season=season, horizon=horizon,
         )
     else:
-        model = next_model_reference_dataset_small(
+        model = next_model_reference_dataset(
             nb_hidden_states=2, past_dependency=past_dependency, season=season, horizon=horizon,
         )
 
