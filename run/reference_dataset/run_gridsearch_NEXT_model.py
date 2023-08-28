@@ -114,6 +114,7 @@ if __name__ == "__main__":
                     model_folder=model_folder,
                     preprocess_input=preprocess_input
                 )
+                write_json(model_eval.numpy(), os.path.join(model_folder, "elbo_eval.json"))
                 if model_eval < best_model_eval:
                     best_model_eval = model_eval
                     best_training_config = {'past_dependency':past_dependency, 'learning_rate':learning_rate, 'batch_size':batch_size}
