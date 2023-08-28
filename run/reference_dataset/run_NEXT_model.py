@@ -80,7 +80,7 @@ if __name__ == "__main__":
     if len(gpus):
         tf.config.set_visible_devices(gpus[gpu_number], "GPU")
         tf.config.set_logical_device_configuration(
-            gpus[gpu_number], [tf.config.LogicalDeviceConfiguration(memory_limit=10000)]
+            gpus[gpu_number], [tf.config.LogicalDeviceConfiguration(memory_limit=20000)]
         )
     seed = args.seed
     np.random.seed(seed)
