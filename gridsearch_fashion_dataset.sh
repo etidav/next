@@ -1,3 +1,3 @@
 #!/bin/sh
  
-python3 /next/run/fashion_dataset/run_NEXT_model.py --main_folder /next/result/fashion_dataset_no_ext_signal_gridsearch --nb_max_epoch 200 --nb_iteration_per_epoch 100 --learning_rate_list 0.005 0.0005 0.00005 --batch_size 64 256 1024 2048 --gpu_number 0 --seed 0 --nb_hidden_state 2 --main_signal_dataset_path /next/data/fashion_dataset/f1_main.csv --ext_signal_dataset_path /next/data/fashion_dataset/f1_fashion_forward.csv --no_ext_signal
+python3 /next/run/fashion_dataset/run_gridsearch_NEXT_model.py --main_folder /next/result/fashion_dataset_no_ext_signal_gridsearch --nb_max_epoch 200 --nb_iteration_per_epoch 100 --learning_rate_list 0.005 0.0005 0.00005 --batch_size 64 256 1024 2048 --gpu_number 0 --seed 0 --nb_hidden_state 2 --main_signal_dataset_path /next/data/fashion_dataset/f1_main.csv --ext_signal_dataset_path /next/data/fashion_dataset/f1_fashion_forward.csv --no_ext_signal

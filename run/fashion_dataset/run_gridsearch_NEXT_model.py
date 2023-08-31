@@ -7,8 +7,10 @@ import json
 from tqdm import tqdm
 import tensorflow as tf
 from utils.utils import write_json
-from model.NEXT_model import next_model_no_ext_signal, next_model_no_ext_signal_FC
-
+from model.NEXT_model import (
+    next_model_no_ext_signal,
+    next_model_with_ext_signal,
+)
 
 if __name__ == "__main__":
 
@@ -28,6 +30,7 @@ if __name__ == "__main__":
         help="path to a dataset gathering the external signals",
         required=True,
     )
+    parser.add_argument("--nb_hidden_state", type=int, help="", default=2)
     parser.add_argument("--nb_max_epoch", type=int, help="", default=50)
     parser.add_argument("--nb_iteration_per_epoch", type=int, help="", default=50)
     parser.add_argument(
@@ -37,6 +40,11 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size_list", nargs="+", type=int, help="", default=None)
     parser.add_argument("--seed", type=int, help="", default=1)
     parser.add_argument("--gpu_number", type=int, help="", default=0)
+    parser.add_argument(
+        "--no_ext_signal",
+        action="store_true",
+        help="add this argument to train a next model without the ext signal",
+    )
 
     args = parser.parse_args()
 
@@ -59,6 +67,8 @@ if __name__ == "__main__":
     learning_rate_list = args.learning_rate_list
     optimizer_name = args.optimizer_name
     batch_size_list = args.batch_size_list
+    nb_hidden_state = args.nb_hidden_state
+    no_ext_signal = args.no_ext_signal
 
     if main_folder[-1] != "/":
         main_folder += "/"
@@ -83,9 +93,20 @@ if __name__ == "__main__":
             )
             if not os.path.exists(model_folder):
                 os.makedirs(model_folder)
-            model = next_model_no_ext_signal(
-                nb_hidden_states=2, past_dependency=104, season=52, horizon=52,
-            )
+            if no_ext_signal:
+                model = next_model_no_ext_signal(
+                    nb_hidden_states=nb_hidden_state,
+                    past_dependency=104,
+                    season=52,
+                    horizon=52,
+                )
+            else:
+                model = next_model_with_ext_signal(
+                    nb_hidden_states=nb_hidden_state,
+                    past_dependency=104,
+                    season=52,
+                    horizon=52,
+                )
 
             print("Start Training")
             model_eval = model.fit(
