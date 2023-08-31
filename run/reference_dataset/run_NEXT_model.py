@@ -7,7 +7,10 @@ import json
 from tqdm import tqdm
 import tensorflow as tf
 from utils.utils import write_json
-from model.NEXT_model import next_model_reference_dataset, next_model_reference_dataset_small
+from model.NEXT_model import (
+    next_model_reference_dataset,
+    next_model_reference_dataset_small,
+)
 
 
 def compute_accuracy_metric(dataset, model, horizon, preprocess_input):
@@ -23,9 +26,9 @@ def compute_accuracy_metric(dataset, model, horizon, preprocess_input):
             y_signal=y_signal,
             w_signal=w_signal,
             nb_simulation=1,
-            preprocess_input=preprocess_input
+            preprocess_input=preprocess_input,
         )
-        model_prediction = model_prediction['y_pred_mean'].T
+        model_prediction = model_prediction["y_pred_mean"].T
 
         if i:
             result["mae"].append(
@@ -35,13 +38,11 @@ def compute_accuracy_metric(dataset, model, horizon, preprocess_input):
                 np.mean(np.square(dataset[-horizon - i : -i] - model_prediction))
             )
         else:
-            result["mae"].append(
-                np.mean(np.abs(dataset[-horizon:] - model_prediction))
-            )
+            result["mae"].append(np.mean(np.abs(dataset[-horizon:] - model_prediction)))
             result["mse"].append(
                 np.mean(np.square(dataset[-horizon:] - model_prediction))
             )
-            
+
     for metric in result:
         result[metric] = np.round(np.mean(result[metric]), 3)
 
@@ -109,7 +110,7 @@ if __name__ == "__main__":
 
     dataset = pd.read_csv(dataset_path, index_col=0)
     dataset.index = pd.to_datetime(dataset.index)
-    if os.path.basename(dataset_path) == 'ETTm2.csv':
+    if os.path.basename(dataset_path) == "ETTm2.csv":
         dataset = dataset[:57600]
         train_size = int(dataset.shape[0] * 0.6)
     else:
@@ -118,17 +119,23 @@ if __name__ == "__main__":
     all_y_data = (dataset - dataset[:train_size].mean(axis=0)) / dataset[
         :train_size
     ].std(axis=0)
-    
+
     y_train = all_y_data[:train_and_eval_size]
     w_train = pd.DataFrame(np.zeros_like(y_train))
 
     if small_model:
         model = next_model_reference_dataset_small(
-            nb_hidden_states=2, past_dependency=past_dependency, season=season, horizon=horizon,
+            nb_hidden_states=2,
+            past_dependency=past_dependency,
+            season=season,
+            horizon=horizon,
         )
     else:
         model = next_model_reference_dataset(
-            nb_hidden_states=2, past_dependency=past_dependency, season=season, horizon=horizon,
+            nb_hidden_states=2,
+            past_dependency=past_dependency,
+            season=season,
+            horizon=horizon,
         )
 
     print("Start Training")
@@ -141,10 +148,12 @@ if __name__ == "__main__":
         learning_rate=learning_rate,
         batch_size=batch_size,
         model_folder=main_folder,
-        preprocess_input=preprocess_input
+        preprocess_input=preprocess_input,
     )
 
     print("Compute accuracy")
-    model_accuracy = compute_accuracy_metric(all_y_data, model, horizon, preprocess_input)
+    model_accuracy = compute_accuracy_metric(
+        all_y_data, model, horizon, preprocess_input
+    )
     write_json(model_accuracy, os.path.join(main_folder, "final_accuracy.json"))
     print(model_accuracy)

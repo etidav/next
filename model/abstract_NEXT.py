@@ -154,9 +154,7 @@ class NEXT(ABC, tf.keras.Model):
         - *trajectories*: a tf.Tensor(nb_time_series,horizon,K,nb_trajectories) containing the trajectories of the emission densities.
         
         """
-        mu, sigma = self.compute_emission_laws_parameters(
-            y_past,w_past, time_index,
-        )
+        mu, sigma = self.compute_emission_laws_parameters(y_past, w_past, time_index,)
         emission_laws_trajectories = tf.stack(
             [
                 tf.random.normal(
@@ -259,7 +257,8 @@ class NEXT(ABC, tf.keras.Model):
             )
             elbo_entropy = tf.math.reduce_sum(
                 tf.math.multiply(
-                    tf.math.log(posterior_probabilities+10**-10), posterior_probabilities
+                    tf.math.log(posterior_probabilities + 10 ** -10),
+                    posterior_probabilities,
                 ),
                 axis=[1, 2],
             )
@@ -282,13 +281,15 @@ class NEXT(ABC, tf.keras.Model):
             )
             elbo_entropy = tf.math.reduce_sum(
                 tf.math.multiply(
-                    tf.math.log(posterior_probabilities+10**-10), posterior_probabilities
+                    tf.math.log(posterior_probabilities + 10 ** -10),
+                    posterior_probabilities,
                 ),
                 axis=[1, 2],
             )
             elbo_hidden_states = tf.math.reduce_sum(
                 tf.math.multiply(
-                    tf.math.log(prior_probabilities+10**-10), posterior_probabilities
+                    tf.math.log(prior_probabilities + 10 ** -10),
+                    posterior_probabilities,
                 ),
                 axis=[1, 2],
             )
@@ -408,7 +409,11 @@ class NEXT(ABC, tf.keras.Model):
             else:
                 use_uniform_prior = False
             eval_metric = self.compute_eval_metric(
-                y_signal, w_signal, start_t, use_uniform_prior=use_uniform_prior,preprocess_input=preprocess_input,
+                y_signal,
+                w_signal,
+                start_t,
+                use_uniform_prior=use_uniform_prior,
+                preprocess_input=preprocess_input,
             )
             print("eval metric", eval_metric)
             alternate_training_param = self.get_param()
@@ -499,7 +504,7 @@ class NEXT(ABC, tf.keras.Model):
                         w_signal,
                         start_t,
                         use_uniform_prior=use_uniform_prior,
-                        preprocess_input=preprocess_input
+                        preprocess_input=preprocess_input,
                     )
 
                     if epoch_eval_metric < eval_metric:
@@ -543,7 +548,11 @@ class NEXT(ABC, tf.keras.Model):
             if not wrong_initialisation:
                 self.assign_param(*alternate_training_param)
                 eval_metric = self.compute_eval_metric(
-                    y_signal, w_signal, start_t, use_uniform_prior=use_uniform_prior,preprocess_input=preprocess_input
+                    y_signal,
+                    w_signal,
+                    start_t,
+                    use_uniform_prior=use_uniform_prior,
+                    preprocess_input=preprocess_input,
                 )
                 print(f"alternate_training elbo : {eval_metric}")
                 if model_folder is not None:
@@ -568,7 +577,9 @@ class NEXT(ABC, tf.keras.Model):
                 )
         return eval_metric
 
-    def sample_and_normalize_dataset(self, y_signal, w_signal, batch_size, preprocess_input=True):
+    def sample_and_normalize_dataset(
+        self, y_signal, w_signal, batch_size, preprocess_input=True
+    ):
         """
         draw a sample of sequences from the dataset and normalize them
         
@@ -595,7 +606,7 @@ class NEXT(ABC, tf.keras.Model):
         if batch_size <= y_signal.shape[0]:
             ts_index = tf.random.shuffle(tf.range(y_signal.shape[0]))[:batch_size]
         else:
-            ts_index =  tf.random.uniform(
+            ts_index = tf.random.uniform(
                 shape=[batch_size,], minval=0, maxval=y_signal.shape[0], dtype=tf.int32
             )
         window_index = tf.random.uniform(
@@ -680,7 +691,12 @@ class NEXT(ABC, tf.keras.Model):
             return tf.keras.optimizers.SGD(learning_rate=learning_rate)
 
     def compute_eval_metric(
-        self, y_signal, w_signal, start_t, use_uniform_prior=False, preprocess_input=True
+        self,
+        y_signal,
+        w_signal,
+        start_t,
+        use_uniform_prior=False,
+        preprocess_input=True,
     ):
         """
         compute the ELBO on the eval step
@@ -802,8 +818,10 @@ class NEXT(ABC, tf.keras.Model):
         prior_probabilities = self.compute_prior_probabilities(
             y_past, w_past, time_index
         )
-        final_prediction_renorm = tf.math.reduce_sum(prior_probabilities*emission_laws_mu, axis=2)
-        
+        final_prediction_renorm = tf.math.reduce_sum(
+            prior_probabilities * emission_laws_mu, axis=2
+        )
+
         hidden_state_simulation = tf.stack(
             [
                 tf.random.categorical(

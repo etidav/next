@@ -147,7 +147,9 @@ class next_model_no_ext_signal(NEXT):
         - *sigma*: a tf.Tensor(nb_time_series,horizon) containing the std of the emission densities.
         """
         past_input_no_ext_signal = tf.stack([y_past, time_index], axis=2)
-        model_pred = [self.emission_models[i](past_input_no_ext_signal) for i in range(self.K)]
+        model_pred = [
+            self.emission_models[i](past_input_no_ext_signal) for i in range(self.K)
+        ]
         mu = tf.stack([pred[0] for pred in model_pred], axis=2)
         sigma = tf.stack([pred[1] for pred in model_pred], axis=2)
         return mu, sigma
@@ -175,7 +177,8 @@ class next_model_no_ext_signal(NEXT):
         future_input = mu
         prior_probabilities = self.hidden_state_prior_model([past_input, future_input])
         return prior_probabilities
-    
+
+
 class next_model_with_ext_signal(NEXT):
     """
     Class defining a next model with gaussian emission laws and discrete hidden states.
@@ -282,7 +285,8 @@ class next_model_with_ext_signal(NEXT):
         self.emission_models = [
             self.define_emission_model_no_ext_signal() for i in range(int(self.K / 2))
         ] + [
-            self.define_emission_model_with_ext_signal() for i in range(int(self.K / 2),self.K)
+            self.define_emission_model_with_ext_signal()
+            for i in range(int(self.K / 2), self.K)
         ]
         self.hidden_state_prior_model = self.define_hidden_state_prior_model()
 
@@ -345,9 +349,11 @@ class next_model_with_ext_signal(NEXT):
         past_input_no_ext_signal = tf.stack([y_past, time_index], axis=2)
         past_input_with_ext_signal = tf.stack([y_past, w_past, time_index], axis=2)
         model_pred = [
-            self.emission_models[i](past_input_no_ext_signal) for i in range(int(self.K / 2))
+            self.emission_models[i](past_input_no_ext_signal)
+            for i in range(int(self.K / 2))
         ] + [
-            self.emission_models[i](past_input_with_ext_signal) for i in range(int(self.K / 2), self.K)
+            self.emission_models[i](past_input_with_ext_signal)
+            for i in range(int(self.K / 2), self.K)
         ]
         mu = tf.stack([pred[0] for pred in model_pred], axis=2)
         sigma = tf.stack([pred[1] for pred in model_pred], axis=2)

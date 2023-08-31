@@ -132,9 +132,7 @@ class NEXT(ABC, tf.keras.Model):
         - *trajectories*: a tf.Tensor(nb_time_series,horizon,K,nb_trajectories) containing the trajectories of the emission densities.
         
         """
-        mu, sigma = self.compute_emission_laws_parameters(
-            y_past,w_past, time_index,
-        )
+        mu, sigma = self.compute_emission_laws_parameters(y_past, w_past, time_index,)
         emission_laws_trajectories = tf.stack(
             [
                 tf.random.normal(
@@ -185,7 +183,7 @@ class NEXT(ABC, tf.keras.Model):
                 tf.math.log(2 * np.pi * sigma ** 2)
                 + ((tf.expand_dims(y, axis=2) - mu) ** 2) / tf.math.pow(sigma, 2)
             )
-        
+
     def compute_posterior_probabilities(self, y, y_past, w_past, time_index):
         """
         Compute the posterior probabilities used the Q quantity of the EM algorithm.
@@ -204,13 +202,20 @@ class NEXT(ABC, tf.keras.Model):
         
         - *probability_value*: a tf.Tensor(nb_time_series, horizon,K) containing the probability that a value has been realised by one of the emission densities.
         """
-        
+
         emission_densities = self.compute_emission_laws_densities(
-             y, y_past, w_past, time_index, apply_log=False
+            y, y_past, w_past, time_index, apply_log=False
         )
-        prior_probabilities = self.compute_prior_probabilities(y_past, w_past, time_index)
-        posterior_probabilities = tf.math.multiply(emission_densities,prior_probabilities)
-        posterior_probabilities = tf.math.divide_no_nan(posterior_probabilities,tf.math.reduce_sum(posterior_probabilities,axis=2,keepdims=True))
+        prior_probabilities = self.compute_prior_probabilities(
+            y_past, w_past, time_index
+        )
+        posterior_probabilities = tf.math.multiply(
+            emission_densities, prior_probabilities
+        )
+        posterior_probabilities = tf.math.divide_no_nan(
+            posterior_probabilities,
+            tf.math.reduce_sum(posterior_probabilities, axis=2, keepdims=True),
+        )
         posterior_probabilities = tf.stop_gradient(posterior_probabilities)
         return posterior_probabilities
 
@@ -248,24 +253,22 @@ class NEXT(ABC, tf.keras.Model):
             w_past = tf.zeros_like(y)
         if y_past is None:
             y_past = tf.zeros_like(y)
-        
+
         emission_densities = self.compute_emission_laws_densities(
-             y, y_past, w_past, time_index, apply_log=True
+            y, y_past, w_past, time_index, apply_log=True
         )
-        prior_probabilities = self.compute_prior_probabilities(y_past, w_past, time_index)
+        prior_probabilities = self.compute_prior_probabilities(
+            y_past, w_past, time_index
+        )
         Q_emission = tf.math.reduce_sum(
-            tf.math.multiply(posterior_probabilities, emission_densities),
-            axis=[1, 2],
+            tf.math.multiply(posterior_probabilities, emission_densities), axis=[1, 2],
         )
         Q_transition = tf.math.reduce_sum(
             tf.math.multiply(posterior_probabilities, tf.math.log(prior_probabilities)),
             axis=[1, 2],
         )
-        Q = (
-            -tf.math.reduce_mean(Q_emission)
-            -tf.math.reduce_mean(Q_transition)
-        )
-        
+        Q = -tf.math.reduce_mean(Q_emission) - tf.math.reduce_mean(Q_transition)
+
         return Q
 
     @tf.function
@@ -299,16 +302,11 @@ class NEXT(ABC, tf.keras.Model):
 
         with tf.GradientTape() as tape:
             EM_loss = self.compute_Q(
-                y,
-                y_past,
-                w_past,
-                time_index,
-                posterior_probabilities,
+                y, y_past, w_past, time_index, posterior_probabilities,
             )
             grad = tape.gradient(
                 EM_loss,
-                self.emission_laws_params
-                + self.hidden_state_prior_model_params,
+                self.emission_laws_params + self.hidden_state_prior_model_params,
             )
 
         return grad
@@ -365,27 +363,18 @@ class NEXT(ABC, tf.keras.Model):
             (y, y_past, w_past, time_index,) = self.sample_and_normalize_dataset(
                 y_signal_values, w_signal_values, batch_size, preprocess_input
             )
-            posterior_probabilities = self.compute_posterior_probabilities(y,y_past,w_past,time_index)
+            posterior_probabilities = self.compute_posterior_probabilities(
+                y, y_past, w_past, time_index
+            )
             optimizer = self.build_optimizer(
-                optimizer_name=optimizer_name,
-                learning_rate=learning_rate,
+                optimizer_name=optimizer_name, learning_rate=learning_rate,
             )
-            _Q = self.compute_Q(
-                y,
-                y_past,
-                w_past,
-                time_index,
-                posterior_probabilities,
-            )
+            _Q = self.compute_Q(y, y_past, w_past, time_index, posterior_probabilities,)
             Q_diff = []
             updated_param = []
             for j in tf.range(nb_iteration_per_epoch):
                 grad = self.compute_grad(
-                    y,
-                    y_past,
-                    w_past,
-                    time_index,
-                    posterior_probabilities,
+                    y, y_past, w_past, time_index, posterior_probabilities,
                 )
                 optimizer.apply_gradients(
                     zip(
@@ -396,11 +385,7 @@ class NEXT(ABC, tf.keras.Model):
                 )
                 updated_param.append(self.get_param())
                 Q_iter = self.compute_Q(
-                    y,
-                    y_past,
-                    w_past,
-                    time_index,
-                    posterior_probabilities,
+                    y, y_past, w_past, time_index, posterior_probabilities,
                 )
                 Q_diff.append(Q_iter - _Q)
             try:
@@ -418,16 +403,12 @@ class NEXT(ABC, tf.keras.Model):
                 self.assign_param(*exec_param[-1])
                 if optimizer.lr < 10 ** (-10):
                     break
-                learning_rate = (
-                    learning_rate / 2
-                )
+                learning_rate = learning_rate / 2
                 overfitting_count += 1
             elif Q_diff_best < 0:
                 self.assign_param(*updated_param)
                 epoch_eval_metric = self.compute_eval_metric(
-                    y_signal,
-                    w_signal,
-                    preprocess_input=preprocess_input
+                    y_signal, w_signal, preprocess_input=preprocess_input
                 )
 
                 if epoch_eval_metric < eval_metric:
@@ -448,9 +429,7 @@ class NEXT(ABC, tf.keras.Model):
                 print(
                     f"15 epochs without improvment --> optimizer learning rate reduced to {optimizer.lr/2}"
                 )
-                learning_rate = (
-                    learning_rate / 2
-                )
+                learning_rate = learning_rate / 2
 
             exec_param.append(self.get_param())
 
@@ -476,16 +455,14 @@ class NEXT(ABC, tf.keras.Model):
             print(f"final MASE metric : {eval_metric}")
             if model_folder is not None:
                 write_pickle(
-                    self.get_param(),
-                    os.path.join(
-                        model_folder,
-                        f"final_param.pkl",
-                    ),
+                    self.get_param(), os.path.join(model_folder, f"final_param.pkl",),
                 )
-                
+
         return eval_metric
 
-    def sample_and_normalize_dataset(self, y_signal, w_signal, batch_size, preprocess_input=True):
+    def sample_and_normalize_dataset(
+        self, y_signal, w_signal, batch_size, preprocess_input=True
+    ):
         """
         draw a sample of sequences from the dataset and normalize them
         
@@ -512,7 +489,7 @@ class NEXT(ABC, tf.keras.Model):
         if batch_size <= y_signal.shape[0]:
             ts_index = tf.random.shuffle(tf.range(y_signal.shape[0]))[:batch_size]
         else:
-            ts_index =  tf.random.uniform(
+            ts_index = tf.random.uniform(
                 shape=[batch_size,], minval=0, maxval=y_signal.shape[0], dtype=tf.int32
             )
         window_index = tf.random.uniform(
@@ -596,9 +573,7 @@ class NEXT(ABC, tf.keras.Model):
         elif optimizer_name.lower() == "sgd":
             return tf.keras.optimizers.SGD(learning_rate=learning_rate)
 
-    def compute_eval_metric(
-        self, y_signal, w_signal, preprocess_input=True
-    ):
+    def compute_eval_metric(self, y_signal, w_signal, preprocess_input=True):
         """
         compute the MASE on the eval step
         
@@ -613,24 +588,23 @@ class NEXT(ABC, tf.keras.Model):
         
         - *eval_loss*: a np.array containing the MASE loss
         """
-        
-        y_train = y_signal[:-self.horizon]
-        w_train = w_signal[:-self.horizon]
+
+        y_train = y_signal[: -self.horizon]
+        w_train = w_signal[: -self.horizon]
         eval_pred = self.predict(
-            y_signal=y_train, w_signal=w_train, nb_simulation=1, preprocess_input=preprocess_input
+            y_signal=y_train,
+            w_signal=w_train,
+            nb_simulation=1,
+            preprocess_input=preprocess_input,
         )
-        eval_pred = eval_pred['y_pred_mean']
-        y_train = y_signal[:-self.horizon].values.T
-        y_eval = y_signal[-self.horizon:].values.T
+        eval_pred = eval_pred["y_pred_mean"]
+        y_train = y_signal[: -self.horizon].values.T
+        y_eval = y_signal[-self.horizon :].values.T
         mase_denom = np.mean(
             np.abs(y_train[:, self.season :] - y_train[:, : -self.season]), axis=1
         )
-        mase_y_pred_mean = (
-            np.mean(np.abs(y_eval - eval_pred), axis=1)
-            / mase_denom
-        )
-        
-        
+        mase_y_pred_mean = np.mean(np.abs(y_eval - eval_pred), axis=1) / mase_denom
+
         return np.mean(mase_y_pred_mean)
 
     def predict(
@@ -699,8 +673,10 @@ class NEXT(ABC, tf.keras.Model):
         prior_probabilities = self.compute_prior_probabilities(
             y_past, w_past, time_index
         )
-        final_prediction_renorm = tf.math.reduce_sum(prior_probabilities*emission_laws_mu, axis=2)
-        
+        final_prediction_renorm = tf.math.reduce_sum(
+            prior_probabilities * emission_laws_mu, axis=2
+        )
+
         hidden_state_simulation = tf.stack(
             [
                 tf.random.categorical(
