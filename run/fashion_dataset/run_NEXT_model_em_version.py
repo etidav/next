@@ -115,6 +115,8 @@ if __name__ == "__main__":
         learning_rate=learning_rate,
         batch_size=batch_size,
         model_folder=main_folder,
+        eval_size=1,
+        overlapping_train_eval=True
     )
 
     print("Compute accuracy")

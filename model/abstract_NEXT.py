@@ -19,6 +19,7 @@ class NEXT(ABC, tf.keras.Model):
         past_dependency: int = 1,
         season: int = 1,
         horizon: int = 52,
+        preprocess_name: str = "standardscaler",
     ) -> None:
         """
         Instantiate a next model with gaussian emission laws and discrete hidden states.
@@ -38,6 +39,11 @@ class NEXT(ABC, tf.keras.Model):
         self.past_dependency = past_dependency
         self.season = season
         self.horizon = horizon
+        if preprocess_name not in ["standardscaler", "minmaxscaler", None]:
+            raise ValueError(
+                f"preprocess_name {preprocess_name} is not recognized. preprocess_name recognized: ['standardscaler', 'minmaxscaler',None]"
+            )
+        self.preprocess_name = preprocess_name
 
     @abstractmethod
     def define_param(self) -> None:
@@ -128,8 +134,9 @@ class NEXT(ABC, tf.keras.Model):
         
         - *prosterior_probabilities*: a tf.Tensor(nb_time_series,horizon,K) containing the posterior probabilities to be in a hidden state at each time step.
         """
-
-    def compute_emission_laws_trajectories(
+    
+    @tf.function
+    def sample_emission_laws_trajectories(
         self,
         y_past: tf.Tensor,
         w_past: tf.Tensor,
@@ -166,6 +173,52 @@ class NEXT(ABC, tf.keras.Model):
         )
 
         return emission_laws_trajectories
+    
+    @tf.function
+    def sample_hidden_state_trajectories(
+        self,
+        y_past: tf.Tensor,
+        w_past: tf.Tensor,
+        time_index: tf.Tensor,
+        nb_trajectories: int = 1,
+    ) -> tf.Tensor:
+        """
+        Compute parameters or a realisation of the emission densities.
+        
+        Arguments:
+        
+        - *y_past*: a tf.Tensor(nb_time_series, past_dependency) containing the past values of the main signal.
+        
+        - *w_past*: a tf.Tensor(nb_time_series, past_dependency) containing the values of the external signal.
+        
+        - *time_index*: a tf.Tensor(nb_time_series, past_dependency) corresponding to an encoding of the time period of the input window.
+        
+        - *nb_trajectories*:  number of trajectories to simulate.
+         
+        Returns:
+        
+        - *trajectories*: a tf.Tensor(nb_time_series,horizon,K,nb_trajectories) containing the trajectories of the emission densities.
+        
+        """
+        prior_probabilities_x0, prior_probabilities_transition_matrices = self.compute_prior_probabilities(
+                y_past, w_past, time_index
+            )
+        
+        all_hidden_state_simulation = []
+        all_hidden_state_simulation.append(tf.random.categorical(
+            logits=tf.math.log(prior_probabilities_x0),
+            num_samples=nb_trajectories,
+        ))
+        for time_step in range(self.horizon-1):
+            hiddens_state_simulation = tf.stack([tf.random.categorical(
+                logits=tf.math.log(prior_probabilities_transition_matrices[:,time_step,hidden_state]),
+                num_samples=nb_trajectories,
+            ) for hidden_state in range(self.K)], axis=2)
+            all_hidden_state_simulation.append(tf.gather_nd(hiddens_state_simulation, all_hidden_state_simulation[-1][:,:,tf.newaxis], batch_dims=2))
+
+        hidden_state_trajectories = tf.stack(all_hidden_state_simulation, axis=1)
+
+        return hidden_state_trajectories
 
     def compute_emission_laws_densities(
         self,
@@ -213,8 +266,7 @@ class NEXT(ABC, tf.keras.Model):
         y_past: tf.Tensor,
         w_past: tf.Tensor,
         time_index: tf.Tensor,
-        use_uniform_prior: bool,
-        posterior_probabilities: tf.Tensor = None,
+        use_uniform_prior: int,
     ) -> tf.Tensor:
         """
         Compute the ELBO
@@ -252,7 +304,9 @@ class NEXT(ABC, tf.keras.Model):
                 y, y_past, w_past, time_index, apply_log=True
             )
             elbo_emission_laws = tf.math.reduce_sum(
-                tf.math.multiply(posterior_probabilities, emission_laws_densities),
+                tf.math.multiply(
+                    posterior_probabilities, emission_laws_densities
+                ),
                 axis=[1, 2],
             )
             elbo_entropy = tf.math.reduce_sum(
@@ -262,14 +316,17 @@ class NEXT(ABC, tf.keras.Model):
                 ),
                 axis=[1, 2],
             )
-            elbo = -tf.math.reduce_mean(elbo_emission_laws) + tf.math.reduce_mean(
-                elbo_entropy
+
+            elbo = tf.math.reduce_mean(
+                -elbo_emission_laws
+                + elbo_entropy
             )
+
         else:
             posterior_probabilities = self.compute_posterior_probabilities(
                 y, y_past, w_past, time_index
             )
-            prior_probabilities = self.compute_prior_probabilities(
+            prior_probabilities_x0, prior_probabilities_transition_matrices = self.compute_prior_probabilities(
                 y_past, w_past, time_index
             )
             emission_laws_densities = self.compute_emission_laws_densities(
@@ -286,18 +343,27 @@ class NEXT(ABC, tf.keras.Model):
                 ),
                 axis=[1, 2],
             )
-            elbo_hidden_states = tf.math.reduce_sum(
+            elbo_hidden_states_x0 = tf.math.reduce_sum(
                 tf.math.multiply(
-                    tf.math.log(prior_probabilities + 10 ** -10),
-                    posterior_probabilities,
+                    tf.math.log(prior_probabilities_x0 + 10 ** -10),
+                    posterior_probabilities[:,0,:],
                 ),
-                axis=[1, 2],
+                axis=1,
             )
-            elbo = (
-                -tf.math.reduce_mean(elbo_emission_laws)
-                - tf.math.reduce_mean(elbo_hidden_states)
-                + tf.math.reduce_mean(elbo_entropy)
+            elbo_hidden_states_transition_matrix = tf.math.reduce_sum(
+                tf.math.multiply(
+                    tf.math.log(prior_probabilities_transition_matrices + 10 ** -10),
+                    posterior_probabilities[:,1:,tf.newaxis,:] * posterior_probabilities[:,:-1,:,tf.newaxis],
+                ),
+                axis=[1, 2,3],
             )
+            elbo = tf.math.reduce_mean(
+                - elbo_emission_laws
+                - elbo_hidden_states_x0
+                - elbo_hidden_states_transition_matrix
+                + elbo_entropy
+            )
+
         return elbo
 
     @tf.function
@@ -308,7 +374,6 @@ class NEXT(ABC, tf.keras.Model):
         w_past: tf.Tensor,
         time_index: tf.Tensor,
         use_uniform_prior: bool,
-        posterior_probabilities: tf.Tensor = None,
     ) -> Tuple[tf.Tensor, List]:
         """
         Compute the tf.gradient link the the ELBO loss.
@@ -334,12 +399,7 @@ class NEXT(ABC, tf.keras.Model):
 
         with tf.GradientTape() as tape:
             EM_loss = self.compute_elbo(
-                y,
-                y_past,
-                w_past,
-                time_index,
-                use_uniform_prior,
-                posterior_probabilities,
+                y, y_past, w_past, time_index, use_uniform_prior,
             )
             if use_uniform_prior:
                 grad = tape.gradient(
@@ -365,8 +425,9 @@ class NEXT(ABC, tf.keras.Model):
         optimizer_name: str = "adam",
         learning_rate: float = 0.1,
         batch_size: int = None,
+        eval_size: int = 1,
         model_folder: str = None,
-        preprocess_input: bool = True,
+        overlapping_train_eval: bool = False,
     ) -> None:
         """
         Fit the proposed model.
@@ -385,7 +446,9 @@ class NEXT(ABC, tf.keras.Model):
         
         - *learning_rate*: what learning rate will be used to instantiate the optimizer.
         
-        - *batch_size*: a int indicating how many sequences will be randomly sampled
+        - *batch_size*: a int indicating how many sequences will be randomly sampled.
+        
+        - *eval_size*: a int indicating how many examples will be selected at the end of the time series to create the eval set.
 
         - *model_folder*: a folder where the parameters of the model will be saved.
         """
@@ -397,6 +460,7 @@ class NEXT(ABC, tf.keras.Model):
         start_t = [
             y_signal[0, : -self.horizon].shape[0] for i in range(y_signal.shape[0])
         ]
+
         for alternate_training_index in range(2):
             print(f"training phase {alternate_training_index+1}")
             stop_training = False
@@ -404,16 +468,28 @@ class NEXT(ABC, tf.keras.Model):
             overfitting_count = 0
             early_stopping = 200
             alternate_training_learning_rate = learning_rate
+            optimizer = self.build_optimizer(
+                optimizer_name=optimizer_name,
+                learning_rate=alternate_training_learning_rate,
+            )
             if alternate_training_index == 0:
                 use_uniform_prior = True
             else:
                 use_uniform_prior = False
-            eval_metric = self.compute_eval_metric(
-                y_signal,
-                w_signal,
-                start_t,
-                use_uniform_prior=use_uniform_prior,
-                preprocess_input=preprocess_input,
+            (
+                y_eval,
+                y_past_eval,
+                w_past_eval,
+                time_index_eval,
+            ) = self.sample_and_normalize_dataset(
+                y_signal=y_signal,
+                batch_size=None,
+                w_signal=w_signal,
+                eval_size=eval_size,
+                return_eval_set=True,
+            )
+            eval_metric = self.compute_elbo(
+                y_eval, y_past_eval, w_past_eval, time_index_eval, use_uniform_prior,
             )
             print("eval metric", eval_metric)
             alternate_training_param = self.get_param()
@@ -421,36 +497,20 @@ class NEXT(ABC, tf.keras.Model):
             exec_param.append(self.get_param())
             for epoch in range(nb_max_epoch):
                 (y, y_past, w_past, time_index,) = self.sample_and_normalize_dataset(
-                    y_signal, w_signal, batch_size, preprocess_input
+                    y_signal=y_signal,
+                    w_signal=w_signal,
+                    batch_size=batch_size,
+                    eval_size=eval_size,
+                    overlapping_train_eval=overlapping_train_eval
                 )
-                optimizer = self.build_optimizer(
-                    optimizer_name=optimizer_name,
-                    learning_rate=alternate_training_learning_rate,
-                )
-                if alternate_training_index == 1:
-                    posterior_probabilities = self.compute_posterior_probabilities(
-                        y, y_past, w_past, time_index
-                    )
-                else:
-                    posterior_probabilities = None
                 _elbo = self.compute_elbo(
-                    y,
-                    y_past,
-                    w_past,
-                    time_index,
-                    use_uniform_prior,
-                    posterior_probabilities,
+                    y, y_past, w_past, time_index, use_uniform_prior,
                 )
                 elbo_diff = []
                 updated_param = []
                 for j in tf.range(nb_iteration_per_epoch):
                     grad = self.compute_grad(
-                        y,
-                        y_past,
-                        w_past,
-                        time_index,
-                        use_uniform_prior,
-                        posterior_probabilities,
+                        y, y_past, w_past, time_index, use_uniform_prior,
                     )
                     if alternate_training_index == 0:
                         optimizer.apply_gradients(
@@ -460,6 +520,7 @@ class NEXT(ABC, tf.keras.Model):
                                 + self.hidden_state_posterior_model_params,
                             )
                         )
+
                     elif alternate_training_index == 1:
                         optimizer.apply_gradients(
                             zip(
@@ -470,12 +531,7 @@ class NEXT(ABC, tf.keras.Model):
                         )
                     updated_param.append(self.get_param())
                     elbo_iter = self.compute_elbo(
-                        y,
-                        y_past,
-                        w_past,
-                        time_index,
-                        use_uniform_prior,
-                        posterior_probabilities,
+                        y, y_past, w_past, time_index, use_uniform_prior,
                     )
                     elbo_diff.append(elbo_iter - _elbo)
                 try:
@@ -493,20 +549,17 @@ class NEXT(ABC, tf.keras.Model):
                     self.assign_param(*exec_param[-1])
                     if optimizer.lr < 10 ** (-10):
                         break
-                    alternate_training_learning_rate = (
-                        alternate_training_learning_rate / 2
-                    )
+                    optimizer.lr.assign(optimizer.lr / 2)
                     overfitting_count += 1
                 elif elbo_diff_best < 0:
                     self.assign_param(*updated_param)
-                    epoch_eval_metric = self.compute_eval_metric(
-                        y_signal,
-                        w_signal,
-                        start_t,
-                        use_uniform_prior=use_uniform_prior,
-                        preprocess_input=preprocess_input,
+                    epoch_eval_metric = self.compute_elbo(
+                        y_eval,
+                        y_past_eval,
+                        w_past_eval,
+                        time_index_eval,
+                        use_uniform_prior,
                     )
-
                     if epoch_eval_metric < eval_metric:
                         print(f"Eval elbo: {epoch_eval_metric}. Save param.")
                         eval_metric = epoch_eval_metric
@@ -525,9 +578,7 @@ class NEXT(ABC, tf.keras.Model):
                     print(
                         f"15 epochs without improvment --> optimizer learning rate reduced to {optimizer.lr/2}"
                     )
-                    alternate_training_learning_rate = (
-                        alternate_training_learning_rate / 2
-                    )
+                    optimizer.lr.assign(optimizer.lr / 2)
 
                 exec_param.append(self.get_param())
 
@@ -547,12 +598,12 @@ class NEXT(ABC, tf.keras.Model):
 
             if not wrong_initialisation:
                 self.assign_param(*alternate_training_param)
-                eval_metric = self.compute_eval_metric(
-                    y_signal,
-                    w_signal,
-                    start_t,
-                    use_uniform_prior=use_uniform_prior,
-                    preprocess_input=preprocess_input,
+                eval_metric = self.compute_elbo(
+                    y_eval,
+                    y_past_eval,
+                    w_past_eval,
+                    time_index_eval,
+                    use_uniform_prior,
                 )
                 print(f"alternate_training elbo : {eval_metric}")
                 if model_folder is not None:
@@ -578,7 +629,13 @@ class NEXT(ABC, tf.keras.Model):
         return eval_metric
 
     def sample_and_normalize_dataset(
-        self, y_signal, w_signal, batch_size, preprocess_input=True
+        self,
+        y_signal,
+        w_signal,
+        batch_size,
+        eval_size=None,
+        return_eval_set=False,
+        overlapping_train_eval=False,
     ):
         """
         draw a sample of sequences from the dataset and normalize them
@@ -601,17 +658,69 @@ class NEXT(ABC, tf.keras.Model):
         - *time_index_train*: a tf.Tensor(nb_time_series, past_dependency) corresponding to an encoding of the time period of the input window.
         """
 
-        nb_sample_per_ts = y_signal.shape[1] - self.past_dependency - self.horizon + 1
-
-        if batch_size <= y_signal.shape[0]:
-            ts_index = tf.random.shuffle(tf.range(y_signal.shape[0]))[:batch_size]
-        else:
-            ts_index = tf.random.uniform(
-                shape=[batch_size,], minval=0, maxval=y_signal.shape[0], dtype=tf.int32
+        if not return_eval_set:
+            if overlapping_train_eval:
+                nb_sample_per_ts = (
+                    y_signal.shape[1]
+                    - self.past_dependency
+                    - self.horizon
+                    + 1
+                )
+            else:
+                nb_sample_per_ts = (
+                    y_signal.shape[1]
+                    - self.past_dependency
+                    - 2 * self.horizon
+                    + 1
+                    - eval_size
+                )
+            if batch_size <= y_signal.shape[0]:
+                ts_index = tf.random.shuffle(tf.range(y_signal.shape[0]))[:batch_size]
+            else:
+                ts_index = tf.random.uniform(
+                    shape=[batch_size,],
+                    minval=0,
+                    maxval=y_signal.shape[0],
+                    dtype=tf.int32,
+                )
+            window_index = tf.random.uniform(
+                shape=[batch_size,], minval=0, maxval=nb_sample_per_ts, dtype=tf.int32
             )
-        window_index = tf.random.uniform(
-            shape=[batch_size,], minval=0, maxval=nb_sample_per_ts, dtype=tf.int32
-        )
+        else:
+            if eval_size == 0:
+                raise ValueError(
+                    f"eval_size is Null. If return_eval_set is set to True, you have to define an eval_size > 0"
+                )
+            if eval_size is None:
+                raise ValueError(
+                    f"eval_size is None. If return_eval_set is set to True, you have to define an eval_size > 0"
+                )
+            nb_sample_per_ts = (
+                y_signal.shape[1] - self.past_dependency - self.horizon + 1
+            )
+            if y_signal.shape[0] * eval_size > 10 ** 5:
+                skip_time_step = 100
+            elif y_signal.shape[0] * eval_size > 10 ** 4:
+                skip_time_step = 10
+            else:
+                skip_time_step = 1
+            ts_index = tf.concat(
+                [
+                    tf.range(y_signal.shape[0])
+                    for i in range(0, eval_size, skip_time_step)
+                ],
+                axis=0,
+            )
+            window_index = tf.concat(
+                [
+                    tf.repeat(i, y_signal.shape[0])
+                    for i in range(
+                        nb_sample_per_ts - eval_size, nb_sample_per_ts, skip_time_step
+                    )
+                ],
+                axis=0,
+            )
+
         sampled_y_signal = tf.concat(
             [
                 y_signal[i : i + 1, j : j + self.past_dependency + self.horizon]
@@ -619,16 +728,33 @@ class NEXT(ABC, tf.keras.Model):
             ],
             axis=0,
         )
-        if preprocess_input:
+        if self.preprocess_name == "standardscaler":
             y_signal_mean = tf.math.reduce_mean(
                 sampled_y_signal[:, : self.past_dependency], axis=1, keepdims=True
             )
             y_signal_std = tf.math.reduce_std(
                 sampled_y_signal[:, : self.past_dependency], axis=1, keepdims=True
             )
+            y_signal_std = tf.where(
+                tf.greater(-y_signal_std, -(10 ** -5)),
+                tf.ones_like(y_signal_std),
+                y_signal_std,
+            )
+
             sampled_y_signal = tf.math.divide_no_nan(
                 sampled_y_signal - y_signal_mean, y_signal_std
             )
+        elif self.preprocess_name == "minmaxscaler":
+            y_signal_min = tf.math.reduce_min(
+                sampled_y_signal[:, : self.past_dependency], axis=1, keepdims=True
+            )
+            y_signal_max = tf.math.reduce_max(
+                sampled_y_signal[:, : self.past_dependency], axis=1, keepdims=True
+            )
+            sampled_y_signal = tf.math.divide_no_nan(
+                sampled_y_signal - y_signal_min, y_signal_max - y_signal_min
+            )
+
         y_past = sampled_y_signal[:, : self.past_dependency]
         y_true = sampled_y_signal[:, self.past_dependency :]
 
@@ -640,11 +766,16 @@ class NEXT(ABC, tf.keras.Model):
                 ],
                 axis=0,
             )
-            if preprocess_input:
+            if self.preprocess_name == "standardscaler":
                 w_past = tf.math.divide_no_nan(
                     sampled_w_signal - y_signal_mean, y_signal_std
                 )
-            else:
+            elif self.preprocess_name == "minmaxscaler":
+                w_past = tf.math.divide_no_nan(
+                    sampled_w_signal - y_signal_min, y_signal_max - y_signal_min
+                )
+                w_past = sampled_w_signal
+            elif self.preprocess_name is None:
                 w_past = sampled_w_signal
         else:
             w_past = tf.zeros_like(y_past)
@@ -690,74 +821,11 @@ class NEXT(ABC, tf.keras.Model):
         elif optimizer_name.lower() == "sgd":
             return tf.keras.optimizers.SGD(learning_rate=learning_rate)
 
-    def compute_eval_metric(
-        self,
-        y_signal,
-        w_signal,
-        start_t,
-        use_uniform_prior=False,
-        preprocess_input=True,
-    ):
-        """
-        compute the ELBO on the eval step
-        
-        Arguments:
-        
-        - *y_signal*: a tf.Tensor(nb_time_series, nb_time_step) containing the main signal.
-        
-         - *w_signal*: a tf.Tensor(nb_time_series, nb_time_step) containing the external signal.
-        
-        - *start_t*: a list of integers representing the time step of the last input value of each sequences.
-        
-        - *use_uniform_prior*: if True, will use a uniform prior in place of the variational model for the emission laws model training.
-         
-        Returns:
-        
-        - *eval_loss*: a tf.Tensor(1) containing the ELBO loss
-        """
-        time_index = tf.concat(
-            [
-                tf.reshape(
-                    tf.range(i - self.past_dependency, i, dtype=tf.float64), (1, -1)
-                )
-                for i in start_t
-            ],
-            axis=0,
-        )
-        time_index = tf.math.divide(
-            tf.math.floormod(time_index, self.season), self.season
-        )
-        sampled_y_signal = y_signal[:, -self.horizon - self.past_dependency :]
-        sampled_w_signal = w_signal[:, -self.horizon - self.past_dependency :]
-        if preprocess_input:
-            y_signal_mean = tf.math.reduce_mean(
-                sampled_y_signal[:, : self.past_dependency], axis=1, keepdims=True
-            )
-            y_signal_std = tf.math.reduce_std(
-                sampled_y_signal[:, : self.past_dependency], axis=1, keepdims=True
-            )
-            sampled_y_signal = tf.math.divide_no_nan(
-                sampled_y_signal - y_signal_mean, y_signal_std
-            )
-            sampled_w_signal = tf.math.divide_no_nan(
-                sampled_w_signal - y_signal_mean, y_signal_std
-            )
-        eval_loss = self.compute_elbo(
-            sampled_y_signal[:, self.past_dependency :],
-            sampled_y_signal[:, : self.past_dependency],
-            sampled_w_signal[:, : self.past_dependency],
-            time_index,
-            use_uniform_prior,
-            None,
-        )
-        return eval_loss
-
     def predict(
         self,
         y_signal: pd.DataFrame = None,
         w_signal: pd.DataFrame = None,
         nb_simulation: int = 100,
-        preprocess_input: bool = True,
     ):
         """
         simulate a (X_t,Y_t) process of length T.
@@ -789,11 +857,21 @@ class NEXT(ABC, tf.keras.Model):
             w_past = w_past[:, -self.past_dependency :]
         else:
             w_past = tf.zeros_like(y_past)
-        if preprocess_input:
+        if self.preprocess_name == "standardscaler":
             y_past_mean = tf.math.reduce_mean(y_past, axis=1, keepdims=True)
             y_past_std = tf.math.reduce_std(y_past, axis=1, keepdims=True)
+            y_past_std = tf.where(
+                tf.greater(-y_past_std, -(10 ** -5)),
+                tf.ones_like(y_past_std),
+                y_past_std,
+            )
             y_past = tf.math.divide_no_nan(y_past - y_past_mean, y_past_std)
             w_past = tf.math.divide_no_nan(w_past - y_past_mean, y_past_std)
+        elif self.preprocess_name == "minmaxscaler":
+            y_past_min = tf.math.reduce_min(y_past, axis=1, keepdims=True)
+            y_past_max = tf.math.reduce_max(y_past, axis=1, keepdims=True)
+            y_past = tf.math.divide_no_nan(y_past - y_past_min, y_past_max - y_past_min)
+            w_past = tf.math.divide_no_nan(w_past - y_past_min, y_past_max - y_past_min)
 
         time_index = tf.concat(
             [
@@ -807,62 +885,57 @@ class NEXT(ABC, tf.keras.Model):
         time_index = tf.math.divide(
             tf.math.floormod(time_index, self.season), self.season
         )
-
+        
         emission_laws_mu, emission_laws_sigma = self.compute_emission_laws_parameters(
             y_past=y_past, w_past=w_past, time_index=time_index
         )
-        if preprocess_input:
+        if self.preprocess_name == "standardscaler":
             emission_laws_mu = emission_laws_mu * tf.expand_dims(
                 y_past_std, axis=2
             ) + tf.expand_dims(y_past_mean, axis=2)
-        prior_probabilities = self.compute_prior_probabilities(
-            y_past, w_past, time_index
-        )
-        final_prediction_renorm = tf.math.reduce_sum(
-            prior_probabilities * emission_laws_mu, axis=2
-        )
+        elif self.preprocess_name == "minmaxscaler":
+            emission_laws_mu = emission_laws_mu * tf.expand_dims(
+                y_past_max - y_past_min, axis=2
+            ) + tf.expand_dims(y_past_min, axis=2)
 
-        hidden_state_simulation = tf.stack(
-            [
-                tf.random.categorical(
-                    logits=tf.math.log(prior_probabilities[i, :, :]),
-                    num_samples=nb_simulation,
-                )
-                for i in range(prior_probabilities.shape[0])
-            ],
-            axis=0,
-        )
-        hidden_state_simulation_one_hot = tf.one_hot(
-            hidden_state_simulation, self.K, axis=2
-        )
-        hidden_state_simulation_one_hot = tf.cast(
-            hidden_state_simulation_one_hot, tf.float64
-        )
-        hidden_state_simulation = tf.cast(hidden_state_simulation, tf.float64)
-
-        emission_laws_simulations = self.compute_emission_laws_trajectories(
+        emission_laws_simulations = self.sample_emission_laws_trajectories(
             y_past=y_past,
             w_past=w_past,
             time_index=time_index,
             nb_trajectories=nb_simulation,
         )
-        if preprocess_input:
+        hidden_state_simulations = self.sample_hidden_state_trajectories(
+            y_past=y_past,
+            w_past=w_past,
+            time_index=time_index,
+            nb_trajectories=nb_simulation,
+        )
+    
+        if self.preprocess_name == "standardscaler":
             y_past_std = y_past_std[:, :, tf.newaxis, tf.newaxis]
             y_past_mean = y_past_mean[:, :, tf.newaxis, tf.newaxis]
             emission_laws_simulations = (
                 emission_laws_simulations * y_past_std + y_past_mean
             )
-
+        elif self.preprocess_name == "minmaxscaler":
+            y_past_min = y_past_min[:, :, tf.newaxis, tf.newaxis]
+            y_past_max = y_past_max[:, :, tf.newaxis, tf.newaxis]
+            emission_laws_simulations = (
+                emission_laws_simulations * (y_past_max - y_past_min) + y_past_min
+            )
+            
+        hidden_state_simulation_one_hot = tf.one_hot(hidden_state_simulations, self.K, axis=2)
+        hidden_state_simulation_one_hot = tf.cast(hidden_state_simulation_one_hot, tf.float64)
         final_simulation = tf.math.reduce_sum(
             emission_laws_simulations * hidden_state_simulation_one_hot, axis=2
         )
 
         result = {}
-        result["y_pred_mean"] = final_prediction_renorm.numpy()
+        result["y_pred_mean"] = tf.math.reduce_mean(final_simulation, axis=2).numpy()
         result["y_emission_law_mean"] = emission_laws_mu.numpy()
-        result["prior_probabilities"] = prior_probabilities.numpy()
+        result["hidden_state_distribution"] = tf.math.reduce_mean(hidden_state_simulation_one_hot, axis=3).numpy()
         result["all_y_pred"] = final_simulation.numpy()
         result["all_y_emission_law"] = emission_laws_simulations.numpy()
-        result["all_hidden_state_trajectories"] = hidden_state_simulation.numpy()
+        result["all_hidden_state_trajectories"] = hidden_state_simulations.numpy()
 
         return result

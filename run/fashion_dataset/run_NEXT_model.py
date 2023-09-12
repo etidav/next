@@ -115,11 +115,13 @@ if __name__ == "__main__":
         learning_rate=learning_rate,
         batch_size=batch_size,
         model_folder=main_folder,
+        eval_size=1,
+        overlapping_train_eval=True
     )
 
     print("Compute accuracy")
     model_prediction = model.predict(
-        y_signal=y_train, w_signal=w_train, nb_simulation=1,
+        y_signal=y_train, w_signal=w_train, nb_simulation=100,
     )
     y_test = all_y_data.iloc[-52:]
     model_accuracy = compute_accuracy_metric(
