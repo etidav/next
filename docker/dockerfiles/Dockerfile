@@ -28,8 +28,7 @@ COPY data /next/data
 COPY run /next/run
 COPY utils /next/utils
 COPY model /next/model
-COPY experiments_fashion_dataset.sh /next/experiments_fashion_dataset.sh
-COPY experiments_reference_dataset.sh /next/experiments_reference_dataset.sh
+COPY exp /next/exp
 RUN mkdir -p /next/result
 ENV PYTHONPATH=$PYTHONPATH:/next
 

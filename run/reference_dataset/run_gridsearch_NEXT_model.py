@@ -7,10 +7,10 @@ import json
 from tqdm import tqdm
 import tensorflow as tf
 from utils.utils import write_json
-from model.NEXT_model import (
-    next_model_reference_dataset,
-    next_model_reference_dataset_small,
+from utils.reference_dataset_accuracy_metrics import (
+    compute_reference_dataset_accuracy_metrics,
 )
+from model.NEXT_model import next_model_reference_dataset
 
 
 if __name__ == "__main__":
@@ -22,25 +22,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset_path", type=str, help="path to a dataset", required=True
     )
-    parser.add_argument(
-        "--past_dependency_list", nargs="+", type=int, help="", required=True
-    )
+    parser.add_argument("--nb_hidden_state", type=int, help="", default=3)
     parser.add_argument("--season", type=int, help="", required=True)
     parser.add_argument("--horizon", type=int, help="", required=True)
     parser.add_argument("--nb_max_epoch", type=int, help="", default=50)
-    parser.add_argument("--nb_iteration_per_epoch", type=int, help="", default=50)
-    parser.add_argument(
-        "--learning_rate_list", nargs="+", type=float, help="", default=0.05
-    )
-    parser.add_argument("--optimizer_name", type=str, help="", default="adam")
-    parser.add_argument("--batch_size_list", nargs="+", type=int, help="", default=None)
     parser.add_argument("--seed", type=int, help="", default=1)
     parser.add_argument("--gpu_number", type=int, help="", default=0)
-    parser.add_argument(
-        "--small_model",
-        action="store_true",
-        help="add this argument to train a small version of the next model without lstm components",
-    )
 
     args = parser.parse_args()
 
@@ -57,16 +44,10 @@ if __name__ == "__main__":
 
     main_folder = args.main_folder
     dataset_path = args.dataset_path
-    past_dependency_list = args.past_dependency_list
     season = args.season
     horizon = args.horizon
-    preprocess_input = False
+    nb_hidden_state = args.nb_hidden_state
     nb_max_epoch = args.nb_max_epoch
-    nb_iteration_per_epoch = args.nb_iteration_per_epoch
-    learning_rate_list = args.learning_rate_list
-    optimizer_name = args.optimizer_name
-    batch_size_list = args.batch_size_list
-    small_model = args.small_model
 
     if main_folder[-1] != "/":
         main_folder += "/"
@@ -78,8 +59,13 @@ if __name__ == "__main__":
 
     dataset = pd.read_csv(dataset_path, index_col=0)
     dataset.index = pd.to_datetime(dataset.index)
-    if os.path.basename(dataset_path) == "ETTm2.csv":
-        dataset = dataset[:57600]
+    if os.path.basename(dataset_path) in [
+        "ETTm1.csv",
+        "ETTm2.csv",
+        "ETTh1.csv",
+        "ETTh2.csv",
+    ]:
+        dataset = dataset.loc[:"2018-02-20"]
         train_size = int(dataset.shape[0] * 0.6)
     else:
         train_size = int(dataset.shape[0] * 0.7)
@@ -87,58 +73,50 @@ if __name__ == "__main__":
     all_y_data = (dataset - dataset[:train_size].mean(axis=0)) / dataset[
         :train_size
     ].std(axis=0)
+    eval_size = int(dataset.shape[0] * 0.1)
+    preprocess_name = "minmaxscaler"
 
     y_train = all_y_data[:train_and_eval_size]
+    if os.path.basename(dataset_path) == "weather.csv":
+        y_train = y_train.replace(y_train.min(), np.nan)
+        y_train = y_train.fillna(y_train.mean())
     w_train = pd.DataFrame(np.zeros_like(y_train))
 
     best_model_eval = np.inf
     best_training_config = {}
-    for past_dependency in past_dependency_list:
-        for learning_rate in learning_rate_list:
-            for batch_size in batch_size_list:
-                model_folder = os.path.join(
-                    main_folder,
-                    f"past_dependency_{past_dependency}_lr_{learning_rate}_batch_size_{batch_size}",
-                )
-                if not os.path.exists(model_folder):
-                    os.makedirs(model_folder)
+    for past_dependency in [int(i * season) for i in [0.5,1,2,3,4,5]]:
+        model_folder = os.path.join(main_folder, f"past_dependency_{past_dependency}",)
+        if not os.path.exists(model_folder):
+            os.makedirs(model_folder)
 
-                if small_model:
-                    model = next_model_reference_dataset_small(
-                        nb_hidden_states=2,
-                        past_dependency=past_dependency,
-                        season=season,
-                        horizon=horizon,
-                    )
-                else:
-                    model = next_model_reference_dataset(
-                        nb_hidden_states=2,
-                        past_dependency=past_dependency,
-                        season=season,
-                        horizon=horizon,
-                    )
+        model = next_model_reference_dataset(
+            nb_hidden_states=nb_hidden_state,
+            past_dependency=past_dependency,
+            season=season,
+            horizon=horizon,
+            preprocess_name=preprocess_name,
+        )
 
-                print("Start Training")
-                model_eval = model.fit(
-                    y_signal=y_train,
-                    w_signal=w_train,
-                    nb_max_epoch=nb_max_epoch,
-                    nb_iteration_per_epoch=nb_iteration_per_epoch,
-                    optimizer_name=optimizer_name,
-                    learning_rate=learning_rate,
-                    batch_size=batch_size,
-                    model_folder=model_folder,
-                    preprocess_input=preprocess_input,
-                )
-                write_json(
-                    model_eval.numpy(), os.path.join(model_folder, "elbo_eval.json")
-                )
-                if model_eval < best_model_eval:
-                    best_model_eval = model_eval
-                    best_training_config = {
-                        "past_dependency": past_dependency,
-                        "learning_rate": learning_rate,
-                        "batch_size": batch_size,
-                    }
+        print("Start Training")
+        model.fit(
+            y_signal=y_train,
+            w_signal=w_train,
+            nb_max_epoch=nb_max_epoch,
+            nb_iteration_per_epoch=50,
+            optimizer_name="adam",
+            learning_rate=0.00005,
+            batch_size=2048,
+            eval_size=eval_size,
+            model_folder=model_folder,
+        )
+        model_accuracy = compute_reference_dataset_accuracy_metrics(
+            all_y_data, model, horizon, True
+        )
+        write_json(model_accuracy, os.path.join(model_folder, "final_accuracy.json"))
+        if model_accuracy["eval"]["mse"] < best_model_eval:
+            best_model_eval = model_accuracy["eval"]["mse"]
+            best_training_config = {
+                "past_dependency": past_dependency,
+            }
 
     write_json(best_training_config, os.path.join(main_folder, "best_config.json"))
